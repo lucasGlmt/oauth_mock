@@ -1,0 +1,10 @@
+clients:
+  - id: 1
+    name: demo-client
+    redirect_uris:
+      - http://localhost:3000/callback
+    allowed_scopes:
+      - "openid"
+      - "profile"
+      - "email"
+      - "read"
