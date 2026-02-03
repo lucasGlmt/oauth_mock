@@ -1,0 +1,234 @@
+basePath: /api/v1
+definitions:
+  api.PingResponse:
+    properties:
+      message:
+        type: string
+    type: object
+  http.ErrorResponse:
+    properties:
+      error:
+        type: string
+      error_description:
+        type: string
+    type: object
+  http.TokenResponse:
+    properties:
+      access_token:
+        type: string
+      expires_in:
+        type: integer
+      refresh_token:
+        type: string
+      scope:
+        type: string
+      token_type:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: Mock OAuth2 server for testing authentication flows.
+  title: OAuth Mock API
+  version: 1.0.0
+paths:
+  /authorize:
+    get:
+      parameters:
+      - description: Response type
+        enum:
+        - code
+        in: query
+        name: response_type
+        required: true
+        type: string
+      - description: Client ID
+        in: query
+        name: client_id
+        required: true
+        type: string
+      - description: Redirect URI
+        in: query
+        name: redirect_uri
+        required: true
+        type: string
+      - description: Scopes (space-delimited)
+        in: query
+        name: scope
+        type: string
+      - description: State
+        in: query
+        name: state
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Login page
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+      summary: Start authorization flow
+      tags:
+      - oauth
+  /authorize/consent:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      parameters:
+      - description: Client ID
+        in: formData
+        name: client_id
+        required: true
+        type: string
+      - description: Redirect URI
+        in: formData
+        name: redirect_uri
+        required: true
+        type: string
+      - description: Response type
+        enum:
+        - code
+        in: formData
+        name: response_type
+        required: true
+        type: string
+      - description: State
+        in: formData
+        name: state
+        type: string
+      - collectionFormat: csv
+        description: Scopes
+        in: formData
+        items:
+          type: string
+        name: scopes
+        type: array
+      produces:
+      - text/html
+      responses:
+        "302":
+          description: Redirect with code
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+      summary: Submit consent
+      tags:
+      - oauth
+  /authorize/login:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      parameters:
+      - description: Client ID
+        in: formData
+        name: client_id
+        required: true
+        type: string
+      - description: Redirect URI
+        in: formData
+        name: redirect_uri
+        required: true
+        type: string
+      - description: Response type
+        enum:
+        - code
+        in: formData
+        name: response_type
+        required: true
+        type: string
+      - description: Scopes (space-delimited)
+        in: formData
+        name: scope
+        type: string
+      - description: State
+        in: formData
+        name: state
+        type: string
+      - description: Email
+        in: formData
+        name: email
+        required: true
+        type: string
+      - description: Password
+        in: formData
+        name: password
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Consent page
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+        "401":
+          description: Invalid credentials
+          schema:
+            type: string
+      summary: Submit login form
+      tags:
+      - oauth
+  /ping:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.PingResponse'
+      summary: Health check
+      tags:
+      - health
+  /token:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      parameters:
+      - description: Grant type
+        enum:
+        - authorization_code
+        in: formData
+        name: grant_type
+        required: true
+        type: string
+      - description: Authorization code
+        in: formData
+        name: code
+        required: true
+        type: string
+      - description: Client ID
+        in: formData
+        name: client_id
+        required: true
+        type: string
+      - description: Redirect URI
+        in: formData
+        name: redirect_uri
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.TokenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+      summary: Exchange authorization code for token
+      tags:
+      - oauth
+swagger: "2.0"

@@ -35,6 +35,18 @@ func NewOAUTHRouter(cfg *config.Config, validateClientUc usecase.ValidateClientU
 	}
 }
 
+// Authorize godoc
+// @Summary Start authorization flow
+// @Tags oauth
+// @Produce html
+// @Param response_type query string true "Response type" Enums(code)
+// @Param client_id query string true "Client ID"
+// @Param redirect_uri query string true "Redirect URI"
+// @Param scope query string false "Scopes (space-delimited)"
+// @Param state query string false "State"
+// @Success 200 {string} string "Login page"
+// @Failure 400 {object} ErrorResponse
+// @Router /authorize [get]
 func (h *handlerImpl) Authorize(ctx *gin.Context) {
 	params := authorizeParamsFromQuery(ctx)
 	requestedScopes := strings.Fields(params.Scope)
@@ -58,6 +70,22 @@ func (h *handlerImpl) Authorize(ctx *gin.Context) {
 	})
 }
 
+// AuthorizeLogin godoc
+// @Summary Submit login form
+// @Tags oauth
+// @Accept application/x-www-form-urlencoded
+// @Produce html
+// @Param client_id formData string true "Client ID"
+// @Param redirect_uri formData string true "Redirect URI"
+// @Param response_type formData string true "Response type" Enums(code)
+// @Param scope formData string false "Scopes (space-delimited)"
+// @Param state formData string false "State"
+// @Param email formData string true "Email"
+// @Param password formData string true "Password"
+// @Success 200 {string} string "Consent page"
+// @Failure 401 {string} string "Invalid credentials"
+// @Failure 400 {object} ErrorResponse
+// @Router /authorize/login [post]
 func (h *handlerImpl) AuthorizeLogin(ctx *gin.Context) {
 	params := authorizeParamsFromForm(ctx)
 	email := strings.TrimSpace(ctx.PostForm("email"))
@@ -107,6 +135,19 @@ func (h *handlerImpl) AuthorizeLogin(ctx *gin.Context) {
 	})
 }
 
+// AuthorizeConsent godoc
+// @Summary Submit consent
+// @Tags oauth
+// @Accept application/x-www-form-urlencoded
+// @Produce html
+// @Param client_id formData string true "Client ID"
+// @Param redirect_uri formData string true "Redirect URI"
+// @Param response_type formData string true "Response type" Enums(code)
+// @Param state formData string false "State"
+// @Param scopes formData []string false "Scopes"
+// @Success 302 {string} string "Redirect with code"
+// @Failure 400 {object} ErrorResponse
+// @Router /authorize/consent [post]
 func (h *handlerImpl) AuthorizeConsent(ctx *gin.Context) {
 	params := authorizeParamsFromForm(ctx)
 	selectedScopes := ctx.PostFormArray("scopes")
@@ -138,6 +179,18 @@ func (h *handlerImpl) AuthorizeConsent(ctx *gin.Context) {
 	ctx.Redirect(http.StatusFound, redirectTo)
 }
 
+// Token godoc
+// @Summary Exchange authorization code for token
+// @Tags oauth
+// @Accept application/x-www-form-urlencoded
+// @Produce json
+// @Param grant_type formData string true "Grant type" Enums(authorization_code)
+// @Param code formData string true "Authorization code"
+// @Param client_id formData string true "Client ID"
+// @Param redirect_uri formData string true "Redirect URI"
+// @Success 200 {object} TokenResponse
+// @Failure 400 {object} ErrorResponse
+// @Router /token [post]
 func (h *handlerImpl) Token(ctx *gin.Context) {
 	grantType := ctx.PostForm("grant_type")
 	if grantType == "" {
@@ -389,6 +442,19 @@ func optionalState(state string) []string {
 		return nil
 	}
 	return []string{state}
+}
+
+type ErrorResponse struct {
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description,omitempty"`
+}
+
+type TokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	Scope        string `json:"scope,omitempty"`
 }
 
 type authCode struct {

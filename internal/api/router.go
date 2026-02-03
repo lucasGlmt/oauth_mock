@@ -2,7 +2,6 @@ package api
 
 import (
 	"html/template"
-	"net/http"
 
 	"oauthmock/internal/config"
 	"oauthmock/internal/oauth/adapter/db"
@@ -11,12 +10,9 @@ import (
 	oauthHandler "oauthmock/internal/oauth/adapter/http"
 
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
-
-type HealthResponse struct {
-	Status string `json:"status"`
-	Time   string `json:"time"`
-}
 
 func NewRouter(conf config.ApiConfig) *gin.Engine {
 	if conf.Env == "production" {
@@ -36,6 +32,7 @@ func NewRouter(conf config.ApiConfig) *gin.Engine {
 		},
 	})
 	r.LoadHTMLGlob("templates/*.tmpl")
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	cfg, err := config.LoadConfig("config.yaml")
 	if err != nil {
@@ -53,9 +50,7 @@ func NewRouter(conf config.ApiConfig) *gin.Engine {
 	oauthRouter := oauthHandler.NewOAUTHRouter(cfg, validateClientUC)
 
 	api := r.Group("/api/v1")
-	api.GET("/ping", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "pong"})
-	})
+	api.GET("/ping", Ping)
 
 	api.GET("/authorize", oauthRouter.Authorize)
 	api.POST("/authorize/login", oauthRouter.AuthorizeLogin)

@@ -36,3 +36,12 @@ docker run -p 8080:8080 oauth_mock
 ## Project Goal
 The purpose of this project is to provide a mocked OAuth2 server
 to test authentication flows without relying on a real external provider.
+
+## API Docs (Swagger)
+Swagger UI is available at:
+- `http://localhost:8080/swagger/index.html`
+
+To regenerate the documentation after edits to annotations:
+```bash
+swag init -g cmd/api/main.go -o docs
+```

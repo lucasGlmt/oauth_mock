@@ -1,5 +1,10 @@
 package main
 
+// @title OAuth Mock API
+// @version 1.0.0
+// @description Mock OAuth2 server for testing authentication flows.
+// @BasePath /api/v1
+
 import (
 	"context"
 	"log"
@@ -11,6 +16,8 @@ import (
 
 	"oauthmock/internal/api"
 	"oauthmock/internal/config"
+
+	_ "oauthmock/docs"
 )
 
 func main() {
