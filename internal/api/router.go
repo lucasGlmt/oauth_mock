@@ -1,6 +1,7 @@
 package api
 
 import (
+	"html/template"
 	"net/http"
 
 	"oauthmock/internal/config"
@@ -24,8 +25,22 @@ func NewRouter(conf config.ApiConfig) *gin.Engine {
 
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
+	r.SetFuncMap(template.FuncMap{
+		"contains": func(list []string, value string) bool {
+			for _, v := range list {
+				if v == value {
+					return true
+				}
+			}
+			return false
+		},
+	})
+	r.LoadHTMLGlob("templates/*.tmpl")
 
 	cfg, err := config.LoadConfig("config.yaml")
+	if err != nil {
+		panic(err)
+	}
 
 	// Inst
 
@@ -43,6 +58,8 @@ func NewRouter(conf config.ApiConfig) *gin.Engine {
 	})
 
 	api.GET("/authorize", oauthRouter.Authorize)
+	api.POST("/authorize/login", oauthRouter.AuthorizeLogin)
+	api.POST("/authorize/consent", oauthRouter.AuthorizeConsent)
 
 	return r
 }

@@ -6,4 +6,10 @@ type Client struct {
 	RedirectUris  []string `yaml:"redirect_uris"`
 	Public        bool     `yaml:"public"`
 	AllowedScopes []string `yaml:"allowed_scopes"`
+	Users         []User   `yaml:"users"`
+}
+
+type User struct {
+	Email    string `yaml:"email"`
+	Password string `yaml:"password"`
 }

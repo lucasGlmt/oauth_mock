@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"oauthmock/internal/oauth/adapter/db"
 	"oauthmock/internal/oauth/domain"
+	"slices"
 )
 
 type ValidateClientInput struct {
@@ -12,7 +13,9 @@ type ValidateClientInput struct {
 	RedirectUri string
 	Scopes      []string
 }
-type ValidateClientOutput struct{}
+type ValidateClientOutput struct {
+	Client domain.Client
+}
 type ValidateClientUsecase interface {
 	Execute(ctx context.Context, input ValidateClientInput) (ValidateClientOutput, error)
 }
@@ -37,13 +40,7 @@ func (u *validateClientImpl) Execute(ctx context.Context, input ValidateClientIn
 	}
 
 	// Validate redirect URIs
-	redirectionUriValid := false
-	for _, uri := range client.RedirectUris {
-		if uri == input.RedirectUri {
-			redirectionUriValid = true
-			break
-		}
-	}
+	redirectionUriValid := slices.Contains(client.RedirectUris, input.RedirectUri)
 
 	if !redirectionUriValid {
 		return ValidateClientOutput{}, fmt.Errorf("redirect uri %s is not authorized: %w", input.RedirectUri, domain.ErrInvalidRedirectURI)
@@ -67,5 +64,5 @@ func (u *validateClientImpl) Execute(ctx context.Context, input ValidateClientIn
 		}
 	}
 
-	return ValidateClientOutput{}, nil
+	return ValidateClientOutput{Client: client}, nil
 }

@@ -1,0 +1,32 @@
+{{define "login.tmpl"}}
+  {{template "layout.start" .}}
+
+  <h1 class="h4 mb-1">Sign in</h1>
+  <p class="text-muted mb-4">Application: {{.ClientName}}</p>
+
+  {{if .Error}}
+    <div class="alert alert-danger" role="alert">{{.Error}}</div>
+  {{end}}
+
+  <form method="post" action="/api/v1/authorize/login">
+    <input type="hidden" name="client_id" value="{{.ClientID}}" />
+    <input type="hidden" name="redirect_uri" value="{{.RedirectURI}}" />
+    <input type="hidden" name="response_type" value="{{.ResponseType}}" />
+    <input type="hidden" name="scope" value="{{.Scope}}" />
+    <input type="hidden" name="state" value="{{.State}}" />
+
+    <div class="mb-3">
+      <label for="email" class="form-label">Email</label>
+      <input id="email" type="email" name="email" class="form-control" value="{{.Email}}" required />
+    </div>
+
+    <div class="mb-3">
+      <label for="password" class="form-label">Password</label>
+      <input id="password" type="password" name="password" class="form-control" required />
+    </div>
+
+    <button type="submit" class="btn btn-primary">Sign in</button>
+  </form>
+
+  {{template "layout.end" .}}
+{{end}}

@@ -2,9 +2,12 @@ clients:
   - id: 1
     name: demo-client
     redirect_uris:
-      - http://localhost:3000/callback
+      - http://localhost:3000
     allowed_scopes:
       - "openid"
       - "profile"
       - "email"
       - "read"
+    users:
+      - email: demo@example.com
+        password: demo-password
