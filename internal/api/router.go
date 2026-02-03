@@ -60,6 +60,7 @@ func NewRouter(conf config.ApiConfig) *gin.Engine {
 	api.GET("/authorize", oauthRouter.Authorize)
 	api.POST("/authorize/login", oauthRouter.AuthorizeLogin)
 	api.POST("/authorize/consent", oauthRouter.AuthorizeConsent)
+	api.POST("/token", oauthRouter.Token)
 
 	return r
 }

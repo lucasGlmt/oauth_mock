@@ -8,6 +8,7 @@ import (
 	"oauthmock/internal/oauth/domain"
 	"oauthmock/internal/oauth/usecase"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,17 +18,20 @@ type Handler interface {
 	Authorize(ctx *gin.Context)
 	AuthorizeLogin(ctx *gin.Context)
 	AuthorizeConsent(ctx *gin.Context)
+	Token(ctx *gin.Context)
 }
 
 type handlerImpl struct {
 	cfg              *config.Config
 	validateClientUc usecase.ValidateClientUsecase
+	codes            *authCodeStore
 }
 
 func NewOAUTHRouter(cfg *config.Config, validateClientUc usecase.ValidateClientUsecase) Handler {
 	return &handlerImpl{
 		validateClientUc: validateClientUc,
 		cfg:              cfg,
+		codes:            newAuthCodeStore(5 * time.Minute),
 	}
 }
 
@@ -117,6 +121,11 @@ func (h *handlerImpl) AuthorizeConsent(ctx *gin.Context) {
 	}
 
 	code := "mock-" + time.Now().UTC().Format("20060102150405.000000000")
+	h.codes.Put(code, authCode{
+		ClientID:    params.ClientID,
+		RedirectURI: params.RedirectURI,
+		Scopes:      selectedScopes,
+	})
 	redirectTo, err := buildRedirectURL(params.RedirectURI, url.Values{
 		"code":  []string{code},
 		"state": optionalState(params.State),
@@ -127,6 +136,93 @@ func (h *handlerImpl) AuthorizeConsent(ctx *gin.Context) {
 	}
 
 	ctx.Redirect(http.StatusFound, redirectTo)
+}
+
+func (h *handlerImpl) Token(ctx *gin.Context) {
+	grantType := ctx.PostForm("grant_type")
+	if grantType == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request", "error_description": "grant_type is required"})
+		return
+	}
+	if grantType != "authorization_code" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "unsupported_grant_type", "error_description": "grant_type must be authorization_code"})
+		return
+	}
+
+	code := ctx.PostForm("code")
+	if code == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request", "error_description": "code is required"})
+		return
+	}
+
+	clientID := ctx.PostForm("client_id")
+	if basicUser, _, ok := ctx.Request.BasicAuth(); ok && clientID == "" {
+		clientID = basicUser
+	}
+	if clientID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid_client", "error_description": "client_id is required"})
+		return
+	}
+
+	redirectURI := ctx.PostForm("redirect_uri")
+	if redirectURI == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request", "error_description": "redirect_uri is required"})
+		return
+	}
+
+	codeData, ok := h.codes.Consume(code)
+	if !ok {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid_grant", "error_description": "code is invalid or expired"})
+		return
+	}
+	if codeData.ClientID != clientID {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid_grant", "error_description": "client_id does not match code"})
+		return
+	}
+	if codeData.RedirectURI != redirectURI {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid_grant", "error_description": "redirect_uri does not match code"})
+		return
+	}
+
+	_, err := h.validateClientUc.Execute(ctx.Request.Context(), usecase.ValidateClientInput{
+		ClientId:    clientID,
+		RedirectUri: redirectURI,
+		Scopes:      codeData.Scopes,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrClientNotFound):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid_client", "error_description": "client not found"})
+			return
+		case errors.Is(err, domain.ErrInvalidRedirectURI):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid_grant", "error_description": "redirect_uri not authorized"})
+			return
+		case errors.Is(err, domain.ErrInvalidScope):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid_scope", "error_description": "scope not allowed"})
+			return
+		case errors.Is(err, domain.ErrUnauthorized):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "unauthorized_client", "error_description": "client not authorized"})
+			return
+		default:
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server_error", "error_description": "internal error"})
+			return
+		}
+	}
+
+	issuedAt := time.Now().UTC()
+	accessToken := "access-" + issuedAt.Format("20060102150405.000000000")
+	refreshToken := "refresh-" + issuedAt.Format("20060102150405.000000000")
+
+	resp := gin.H{
+		"access_token":  accessToken,
+		"token_type":    "Bearer",
+		"expires_in":    3600,
+		"refresh_token": refreshToken,
+	}
+	if len(codeData.Scopes) > 0 {
+		resp["scope"] = strings.Join(codeData.Scopes, " ")
+	}
+	ctx.JSON(http.StatusOK, resp)
 }
 
 func (h *handlerImpl) redirectWithError(ctx *gin.Context, redirectUri, code, description, state string) {
@@ -293,4 +389,45 @@ func optionalState(state string) []string {
 		return nil
 	}
 	return []string{state}
+}
+
+type authCode struct {
+	ClientID    string
+	RedirectURI string
+	Scopes      []string
+	ExpiresAt   time.Time
+}
+
+type authCodeStore struct {
+	mu    sync.Mutex
+	ttl   time.Duration
+	codes map[string]authCode
+}
+
+func newAuthCodeStore(ttl time.Duration) *authCodeStore {
+	return &authCodeStore{
+		ttl:   ttl,
+		codes: make(map[string]authCode),
+	}
+}
+
+func (s *authCodeStore) Put(code string, data authCode) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data.ExpiresAt = time.Now().UTC().Add(s.ttl)
+	s.codes[code] = data
+}
+
+func (s *authCodeStore) Consume(code string) (authCode, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, ok := s.codes[code]
+	if !ok {
+		return authCode{}, false
+	}
+	delete(s.codes, code)
+	if time.Now().UTC().After(data.ExpiresAt) {
+		return authCode{}, false
+	}
+	return data, true
 }
