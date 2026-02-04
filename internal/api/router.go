@@ -56,6 +56,10 @@ func NewRouter(conf config.ApiConfig) *gin.Engine {
 	r.GET("/.well-known/openid-configuration", oauthRouter.Discovery)
 	r.GET("/.well-known/jwks.json", oauthRouter.JWKS)
 
+	// Pages
+	r.GET("/", Index)
+	r.GET("/docs", Docs)
+
 	api := r.Group("/api/v1")
 	api.GET("/ping", Ping)
 

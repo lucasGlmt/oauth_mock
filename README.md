@@ -22,7 +22,7 @@ It is **NOT designed to be used in production** and should not be deployed in a 
 
 ## Prerequisites
 
-- Go **1.25.3**
+- Go **1.23+**
 - (optional) Docker
 
 ## Getting Started
