@@ -3,12 +3,14 @@ package config
 import (
 	"os"
 
+	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v3"
 )
 
 type ApiConfig struct {
-	Port string
-	Env  string
+	Port   string
+	Env    string
+	Issuer string
 }
 
 type Config struct {
@@ -18,6 +20,8 @@ type Config struct {
 }
 
 func Load() ApiConfig {
+	_ = godotenv.Load()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -28,9 +32,15 @@ func Load() ApiConfig {
 		env = "development"
 	}
 
+	issuer := os.Getenv("ISSUER")
+	if issuer == "" {
+		issuer = "http://localhost:" + port
+	}
+
 	return ApiConfig{
-		Port: port,
-		Env:  env,
+		Port:   port,
+		Env:    env,
+		Issuer: issuer,
 	}
 }
 

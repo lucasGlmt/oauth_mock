@@ -15,6 +15,44 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/.well-known/jwks.json": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "oauth"
+                ],
+                "summary": "JSON Web Key Set",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.JWKSResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/.well-known/openid-configuration": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "oauth"
+                ],
+                "summary": "OpenID Connect Discovery",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.DiscoveryResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/authorize": {
             "get": {
                 "produces": [
@@ -264,11 +302,12 @@ const docTemplate = `{
                 "tags": [
                     "oauth"
                 ],
-                "summary": "Exchange authorization code for token",
+                "summary": "Exchange authorization code or refresh token for tokens",
                 "parameters": [
                     {
                         "enum": [
-                            "authorization_code"
+                            "authorization_code",
+                            "refresh_token"
                         ],
                         "type": "string",
                         "description": "Grant type",
@@ -278,10 +317,15 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Authorization code",
+                        "description": "Authorization code (required for authorization_code grant)",
                         "name": "code",
-                        "in": "formData",
-                        "required": true
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Refresh token (required for refresh_token grant)",
+                        "name": "refresh_token",
+                        "in": "formData"
                     },
                     {
                         "type": "string",
@@ -292,10 +336,9 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Redirect URI",
+                        "description": "Redirect URI (required for authorization_code grant)",
                         "name": "redirect_uri",
-                        "in": "formData",
-                        "required": true
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -313,6 +356,40 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/userinfo": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "oauth"
+                ],
+                "summary": "Get user information",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer access token",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.UserinfoResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/http.ErrorResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -320,6 +397,32 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.DiscoveryResponse": {
+            "type": "object",
+            "properties": {
+                "authorization_endpoint": {
+                    "type": "string"
+                },
+                "issuer": {
+                    "type": "string"
+                },
+                "jwks_uri": {
+                    "type": "string"
+                },
+                "response_types_supported": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "token_endpoint": {
+                    "type": "string"
+                },
+                "userinfo_endpoint": {
                     "type": "string"
                 }
             }
@@ -335,6 +438,40 @@ const docTemplate = `{
                 }
             }
         },
+        "http.JWK": {
+            "type": "object",
+            "properties": {
+                "alg": {
+                    "type": "string"
+                },
+                "e": {
+                    "type": "string"
+                },
+                "kid": {
+                    "type": "string"
+                },
+                "kty": {
+                    "type": "string"
+                },
+                "n": {
+                    "type": "string"
+                },
+                "use": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.JWKSResponse": {
+            "type": "object",
+            "properties": {
+                "keys": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/http.JWK"
+                    }
+                }
+            }
+        },
         "http.TokenResponse": {
             "type": "object",
             "properties": {
@@ -344,6 +481,9 @@ const docTemplate = `{
                 "expires_in": {
                     "type": "integer"
                 },
+                "id_token": {
+                    "type": "string"
+                },
                 "refresh_token": {
                     "type": "string"
                 },
@@ -351,6 +491,20 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "token_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.UserinfoResponse": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "sub": {
                     "type": "string"
                 }
             }

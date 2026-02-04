@@ -1,0 +1,9 @@
+.git
+.gitignore
+.env
+.env.example
+**/*_test.go
+README.md
+LICENSE
+.claude
+CLAUDE.md

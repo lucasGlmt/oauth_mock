@@ -13,6 +13,9 @@
     <input type="hidden" name="redirect_uri" value="{{.RedirectURI}}" />
     <input type="hidden" name="response_type" value="{{.ResponseType}}" />
     <input type="hidden" name="state" value="{{.State}}" />
+    <input type="hidden" name="email" value="{{.Email}}" />
+    <input type="hidden" name="code_challenge" value="{{.CodeChallenge}}" />
+    <input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}" />
 
     {{if .Scopes}}
       <div class="mb-3">

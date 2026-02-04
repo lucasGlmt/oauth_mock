@@ -1,6 +1,8 @@
 package http
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +13,7 @@ import (
 
 	"oauthmock/internal/oauth/adapter/db"
 	"oauthmock/internal/oauth/domain"
+	"oauthmock/internal/oauth/jwt"
 	"oauthmock/internal/oauth/usecase"
 
 	"github.com/gin-gonic/gin"
@@ -61,7 +64,11 @@ func newTestServer(t *testing.T) (*gin.Engine, *handlerImpl) {
 		},
 	})
 	uc := usecase.NewValidateClientUsecase(repo)
-	h := NewOAUTHRouter(nil, uc).(*handlerImpl)
+	signer, err := jwt.NewSigner()
+	if err != nil {
+		t.Fatalf("create signer: %v", err)
+	}
+	h := NewOAUTHRouter(nil, uc, signer, "http://localhost:8080").(*handlerImpl)
 
 	r := gin.New()
 	r.POST("/token", h.Token)
@@ -190,5 +197,306 @@ func TestToken_RedirectUriMismatch(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "invalid_grant") {
 		t.Fatalf("expected invalid_grant, got %s", w.Body.String())
+	}
+}
+
+func newTestServerWithUserinfo(t *testing.T) (*gin.Engine, *handlerImpl) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	repo := newTestRepo(t, []domain.Client{
+		{
+			ID:            "client-1",
+			Name:          "demo",
+			RedirectUris:  []string{"http://localhost:3000/callback"},
+			AllowedScopes: []string{"openid", "email", "profile"},
+		},
+	})
+	uc := usecase.NewValidateClientUsecase(repo)
+	signer, err := jwt.NewSigner()
+	if err != nil {
+		t.Fatalf("create signer: %v", err)
+	}
+	h := NewOAUTHRouter(nil, uc, signer, "http://localhost:8080").(*handlerImpl)
+
+	r := gin.New()
+	r.POST("/token", h.Token)
+	r.GET("/userinfo", h.Userinfo)
+	return r, h
+}
+
+func TestUserinfo_ReturnsEmailAndSub(t *testing.T) {
+	r, h := newTestServerWithUserinfo(t)
+
+	// Simulate auth code with email
+	h.codes.Put("code-with-email", authCode{
+		ClientID:    "client-1",
+		RedirectURI: "http://localhost:3000/callback",
+		Scopes:      []string{"openid", "email"},
+		Email:       "test@example.com",
+	})
+
+	// Exchange code for tokens
+	tokenResp := postForm(t, r, "/token", url.Values{
+		"grant_type":   []string{"authorization_code"},
+		"code":         []string{"code-with-email"},
+		"client_id":    []string{"client-1"},
+		"redirect_uri": []string{"http://localhost:3000/callback"},
+	})
+
+	if tokenResp.Code != http.StatusOK {
+		t.Fatalf("token exchange failed: %d: %s", tokenResp.Code, tokenResp.Body.String())
+	}
+
+	var tokenData map[string]any
+	if err := json.Unmarshal(tokenResp.Body.Bytes(), &tokenData); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+
+	accessToken := tokenData["access_token"].(string)
+
+	// Call userinfo
+	req := httptest.NewRequest(http.MethodGet, "/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("userinfo failed: %d: %s", w.Code, w.Body.String())
+	}
+
+	var userinfo map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &userinfo); err != nil {
+		t.Fatalf("decode userinfo: %v", err)
+	}
+
+	if userinfo["sub"] != "test@example.com" {
+		t.Errorf("expected sub=test@example.com, got %v", userinfo["sub"])
+	}
+	if userinfo["email"] != "test@example.com" {
+		t.Errorf("expected email=test@example.com, got %v", userinfo["email"])
+	}
+}
+
+func TestToken_ReturnsIDToken(t *testing.T) {
+	r, h := newTestServerWithUserinfo(t)
+
+	h.codes.Put("code-idtoken", authCode{
+		ClientID:    "client-1",
+		RedirectURI: "http://localhost:3000/callback",
+		Scopes:      []string{"openid", "email"},
+		Email:       "idtoken@example.com",
+	})
+
+	w := postForm(t, r, "/token", url.Values{
+		"grant_type":   []string{"authorization_code"},
+		"code":         []string{"code-idtoken"},
+		"client_id":    []string{"client-1"},
+		"redirect_uri": []string{"http://localhost:3000/callback"},
+	})
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+
+	idToken, ok := resp["id_token"].(string)
+	if !ok || idToken == "" {
+		t.Fatalf("expected id_token in response, got %v", resp["id_token"])
+	}
+
+	// Verify it's a valid JWT (has 3 parts)
+	parts := strings.Split(idToken, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected JWT with 3 parts, got %d", len(parts))
+	}
+}
+
+func TestRefreshToken_PreservesEmail(t *testing.T) {
+	r, h := newTestServerWithUserinfo(t)
+
+	// Simulate auth code with email
+	h.codes.Put("code-refresh", authCode{
+		ClientID:    "client-1",
+		RedirectURI: "http://localhost:3000/callback",
+		Scopes:      []string{"openid", "email"},
+		Email:       "refresh@example.com",
+	})
+
+	// Exchange code for tokens
+	tokenResp := postForm(t, r, "/token", url.Values{
+		"grant_type":   []string{"authorization_code"},
+		"code":         []string{"code-refresh"},
+		"client_id":    []string{"client-1"},
+		"redirect_uri": []string{"http://localhost:3000/callback"},
+	})
+
+	var tokenData map[string]any
+	if err := json.Unmarshal(tokenResp.Body.Bytes(), &tokenData); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+
+	refreshToken := tokenData["refresh_token"].(string)
+
+	// Use refresh token
+	refreshResp := postForm(t, r, "/token", url.Values{
+		"grant_type":    []string{"refresh_token"},
+		"refresh_token": []string{refreshToken},
+		"client_id":     []string{"client-1"},
+	})
+
+	if refreshResp.Code != http.StatusOK {
+		t.Fatalf("refresh failed: %d: %s", refreshResp.Code, refreshResp.Body.String())
+	}
+
+	var newTokenData map[string]any
+	if err := json.Unmarshal(refreshResp.Body.Bytes(), &newTokenData); err != nil {
+		t.Fatalf("decode refresh response: %v", err)
+	}
+
+	newAccessToken := newTokenData["access_token"].(string)
+
+	// Call userinfo with new token
+	req := httptest.NewRequest(http.MethodGet, "/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer "+newAccessToken)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("userinfo failed: %d: %s", w.Code, w.Body.String())
+	}
+
+	var userinfo map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &userinfo); err != nil {
+		t.Fatalf("decode userinfo: %v", err)
+	}
+
+	if userinfo["sub"] != "refresh@example.com" {
+		t.Errorf("expected sub=refresh@example.com, got %v", userinfo["sub"])
+	}
+	if userinfo["email"] != "refresh@example.com" {
+		t.Errorf("expected email=refresh@example.com, got %v", userinfo["email"])
+	}
+}
+
+func generateCodeChallenge(verifier string) string {
+	hash := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(hash[:])
+}
+
+func TestPKCE_S256_Success(t *testing.T) {
+	r, h := newTestServer(t)
+
+	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	codeChallenge := generateCodeChallenge(codeVerifier)
+
+	h.codes.Put("code-pkce", authCode{
+		ClientID:            "client-1",
+		RedirectURI:         "http://localhost:3000/callback",
+		Scopes:              []string{"openid"},
+		CodeChallenge:       codeChallenge,
+		CodeChallengeMethod: "S256",
+	})
+
+	w := postForm(t, r, "/token", url.Values{
+		"grant_type":    []string{"authorization_code"},
+		"code":          []string{"code-pkce"},
+		"client_id":     []string{"client-1"},
+		"redirect_uri":  []string{"http://localhost:3000/callback"},
+		"code_verifier": []string{codeVerifier},
+	})
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPKCE_S256_InvalidVerifier(t *testing.T) {
+	r, h := newTestServer(t)
+
+	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	codeChallenge := generateCodeChallenge(codeVerifier)
+
+	h.codes.Put("code-pkce-invalid", authCode{
+		ClientID:            "client-1",
+		RedirectURI:         "http://localhost:3000/callback",
+		Scopes:              []string{"openid"},
+		CodeChallenge:       codeChallenge,
+		CodeChallengeMethod: "S256",
+	})
+
+	w := postForm(t, r, "/token", url.Values{
+		"grant_type":    []string{"authorization_code"},
+		"code":          []string{"code-pkce-invalid"},
+		"client_id":     []string{"client-1"},
+		"redirect_uri":  []string{"http://localhost:3000/callback"},
+		"code_verifier": []string{"wrong-verifier"},
+	})
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "invalid_grant") {
+		t.Fatalf("expected invalid_grant error, got %s", w.Body.String())
+	}
+}
+
+func TestPKCE_MissingVerifier(t *testing.T) {
+	r, h := newTestServer(t)
+
+	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	codeChallenge := generateCodeChallenge(codeVerifier)
+
+	h.codes.Put("code-pkce-missing", authCode{
+		ClientID:            "client-1",
+		RedirectURI:         "http://localhost:3000/callback",
+		Scopes:              []string{"openid"},
+		CodeChallenge:       codeChallenge,
+		CodeChallengeMethod: "S256",
+	})
+
+	w := postForm(t, r, "/token", url.Values{
+		"grant_type":   []string{"authorization_code"},
+		"code":         []string{"code-pkce-missing"},
+		"client_id":    []string{"client-1"},
+		"redirect_uri": []string{"http://localhost:3000/callback"},
+		// No code_verifier
+	})
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "code_verifier is required") {
+		t.Fatalf("expected code_verifier required error, got %s", w.Body.String())
+	}
+}
+
+func TestPKCE_Plain_Success(t *testing.T) {
+	r, h := newTestServer(t)
+
+	codeVerifier := "plain-verifier-value"
+
+	h.codes.Put("code-pkce-plain", authCode{
+		ClientID:            "client-1",
+		RedirectURI:         "http://localhost:3000/callback",
+		Scopes:              []string{"openid"},
+		CodeChallenge:       codeVerifier, // plain: challenge == verifier
+		CodeChallengeMethod: "plain",
+	})
+
+	w := postForm(t, r, "/token", url.Values{
+		"grant_type":    []string{"authorization_code"},
+		"code":          []string{"code-pkce-plain"},
+		"client_id":     []string{"client-1"},
+		"redirect_uri":  []string{"http://localhost:3000/callback"},
+		"code_verifier": []string{codeVerifier},
+	})
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }

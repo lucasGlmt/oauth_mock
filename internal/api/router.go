@@ -5,9 +5,9 @@ import (
 
 	"oauthmock/internal/config"
 	"oauthmock/internal/oauth/adapter/db"
-	"oauthmock/internal/oauth/usecase"
-
 	oauthHandler "oauthmock/internal/oauth/adapter/http"
+	"oauthmock/internal/oauth/jwt"
+	"oauthmock/internal/oauth/usecase"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -39,15 +39,22 @@ func NewRouter(conf config.ApiConfig) *gin.Engine {
 		panic(err)
 	}
 
-	// Inst
-
 	repoClients, err := db.NewRepositoryFromYAML("clients.yaml")
 	if err != nil {
 		panic(err)
 	}
 
+	jwtSigner, err := jwt.NewSigner()
+	if err != nil {
+		panic(err)
+	}
+
 	validateClientUC := usecase.NewValidateClientUsecase(repoClients)
-	oauthRouter := oauthHandler.NewOAUTHRouter(cfg, validateClientUC)
+	oauthRouter := oauthHandler.NewOAUTHRouter(cfg, validateClientUC, jwtSigner, conf.Issuer)
+
+	// OIDC Discovery endpoints (at root level)
+	r.GET("/.well-known/openid-configuration", oauthRouter.Discovery)
+	r.GET("/.well-known/jwks.json", oauthRouter.JWKS)
 
 	api := r.Group("/api/v1")
 	api.GET("/ping", Ping)
@@ -56,6 +63,7 @@ func NewRouter(conf config.ApiConfig) *gin.Engine {
 	api.POST("/authorize/login", oauthRouter.AuthorizeLogin)
 	api.POST("/authorize/consent", oauthRouter.AuthorizeConsent)
 	api.POST("/token", oauthRouter.Token)
+	api.GET("/userinfo", oauthRouter.Userinfo)
 
 	return r
 }

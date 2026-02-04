@@ -5,6 +5,23 @@ definitions:
       message:
         type: string
     type: object
+  http.DiscoveryResponse:
+    properties:
+      authorization_endpoint:
+        type: string
+      issuer:
+        type: string
+      jwks_uri:
+        type: string
+      response_types_supported:
+        items:
+          type: string
+        type: array
+      token_endpoint:
+        type: string
+      userinfo_endpoint:
+        type: string
+    type: object
   http.ErrorResponse:
     properties:
       error:
@@ -12,17 +29,50 @@ definitions:
       error_description:
         type: string
     type: object
+  http.JWK:
+    properties:
+      alg:
+        type: string
+      e:
+        type: string
+      kid:
+        type: string
+      kty:
+        type: string
+      "n":
+        type: string
+      use:
+        type: string
+    type: object
+  http.JWKSResponse:
+    properties:
+      keys:
+        items:
+          $ref: '#/definitions/http.JWK'
+        type: array
+    type: object
   http.TokenResponse:
     properties:
       access_token:
         type: string
       expires_in:
         type: integer
+      id_token:
+        type: string
       refresh_token:
         type: string
       scope:
         type: string
       token_type:
+        type: string
+    type: object
+  http.UserinfoResponse:
+    properties:
+      email:
+        type: string
+      name:
+        type: string
+      sub:
         type: string
     type: object
 info:
@@ -31,6 +81,30 @@ info:
   title: OAuth Mock API
   version: 1.0.0
 paths:
+  /.well-known/jwks.json:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.JWKSResponse'
+      summary: JSON Web Key Set
+      tags:
+      - oauth
+  /.well-known/openid-configuration:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.DiscoveryResponse'
+      summary: OpenID Connect Discovery
+      tags:
+      - oauth
   /authorize:
     get:
       parameters:
@@ -198,24 +272,27 @@ paths:
       - description: Grant type
         enum:
         - authorization_code
+        - refresh_token
         in: formData
         name: grant_type
         required: true
         type: string
-      - description: Authorization code
+      - description: Authorization code (required for authorization_code grant)
         in: formData
         name: code
-        required: true
+        type: string
+      - description: Refresh token (required for refresh_token grant)
+        in: formData
+        name: refresh_token
         type: string
       - description: Client ID
         in: formData
         name: client_id
         required: true
         type: string
-      - description: Redirect URI
+      - description: Redirect URI (required for authorization_code grant)
         in: formData
         name: redirect_uri
-        required: true
         type: string
       produces:
       - application/json
@@ -228,7 +305,29 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/http.ErrorResponse'
-      summary: Exchange authorization code for token
+      summary: Exchange authorization code or refresh token for tokens
+      tags:
+      - oauth
+  /userinfo:
+    get:
+      parameters:
+      - description: Bearer access token
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.UserinfoResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/http.ErrorResponse'
+      summary: Get user information
       tags:
       - oauth
 swagger: "2.0"
